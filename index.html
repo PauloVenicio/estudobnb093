@@ -77,7 +77,7 @@
         <span class="icon">🔒</span>
         <div>
           <b>Guarde seus materiais de estudo do seu jeito</b>
-          Adicione arquivos locais ou adicione links diretos da nuvem de forma organizada e simples.
+          Adicione arquivos locais ou cole links diretos da nuvem. Se o link da nuvem bloquear a tela interna, use o botão amarelo "Abrir Externamente".
         </div>
       </div>
       <div class="section-head"><h2>Matérias</h2><span class="count" id="total">0 Materiais</span></div>
@@ -163,7 +163,7 @@
             store[record.subjectId].push({
               dbId: record.id,
               name: record.name,
-              type: record.type || 'file', // 'file' ou 'link'
+              type: record.type || 'file',
               size: record.size || 0,
               url: record.url || null
             });
@@ -258,15 +258,23 @@
       const extBtn = el('externalLink');
       
       if (item.type === 'link') {
-        // Se for link externo, configura botão alternativo caso o iframe dê tela preta devido a bloqueio do Google Drive/Nuvem
-        extBtn.href = item.url;
+        let finalUrl = item.url;
+
+        // Tenta contornar bloqueio de visualização direta do OneDrive longa ou curta
+        if (finalUrl.includes('onedrive.live.com') || finalUrl.includes('1drv.ms')) {
+          if (!finalUrl.includes('download=1') && !finalUrl.includes('embed')) {
+            finalUrl += finalUrl.includes('?') ? '&download=1' : '?download=1';
+          }
+        }
+
+        extBtn.href = item.url; // Link limpo e seguro para abrir externamente
         extBtn.style.display = 'inline-block';
         
         el('readerTitle').textContent = item.name;
-        el('pdfFrame').src = item.url;
+        el('pdfFrame').src = finalUrl;
         el('reader').classList.add('show');
       } else {
-        // Se for arquivo local do IndexedDB
+        // Arquivos locais vindos do IndexedDB
         extBtn.style.display = 'none';
         const transaction = db.transaction(['pdfs'], 'readonly');
         const objectStore = transaction.objectStore('pdfs');
@@ -286,7 +294,7 @@
       }
     }
     
-    // Adicionar arquivo local
+    // Upload de arquivo local
     el('addButton').addEventListener('click', () => el('picker').click());
     el('picker').addEventListener('change', async (e) => {
       const selectedFiles = [...e.target.files].filter(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
@@ -299,7 +307,7 @@
       render(); 
     });
 
-    // Adicionar link externo da Nuvem
+    // Cadastro de link da Nuvem
     el('addLinkButton').addEventListener('click', async () => {
       const urlInput = prompt('Cole o link do PDF da nuvem (Google Drive, OneDrive, etc.):');
       if (!urlInput || urlInput.trim() === '') return;
