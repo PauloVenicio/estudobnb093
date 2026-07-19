@@ -63,25 +63,38 @@
   <div class="app">
     <header>
       <div class="brand"><span class="brand-mark">↗</span> BNB 093</div>
-      <h1>Seu material, no ritmo da aprovação.</h1>
+      <h1 id="welcomeTitle">Seu material, no ritmo da aprovação.</h1>
       <p>Organize os PDFs e estude onde estiver.</p>
     </header>
     <main>
-      <div class="notice"><span class="icon">🔒</span><div><b>Seus arquivos ficam neste aparelho</b>Os PDFs selecionados não são enviados para a internet. Ao fechar esta página, selecione-os novamente.</div></div>
+      <div class="notice">
+        <span class="icon">🔒</span>
+        <div>
+          <b>Seus arquivos ficam salvos de forma segura neste dispositivo</b>
+          Os PDFs agora permanecem guardados no navegador para uso posterior e não são enviados para a internet.
+        </div>
+      </div>
       <div class="section-head"><h2>Matérias</h2><span class="count" id="total">0 PDFs</span></div>
       <div class="subjects" id="subjects"></div>
       <section class="library">
-        <div class="library-top"><div><h2>Biblioteca</h2><div class="current" id="current">Escolha uma matéria</div></div><button class="add" id="addButton" type="button">+ Adicionar PDF</button></div>
+        <div class="library-top">
+          <div>
+            <h2>Biblioteca</h2>
+            <div class="current" id="current">Escolha uma matéria</div>
+          </div>
+          <button class="add" id="addButton" type="button">+ Adicionar PDF</button>
+        </div>
         <input id="picker" type="file" accept="application/pdf,.pdf" multiple>
         <div id="files"></div>
       </section>
-      <div class="footer">2026 - Paulo Carvalho - Banco do Nordeste · Direitos Reservados.
+      <footer class="footer">2026 - Paulo Carvalho - Banco do Nordeste · Direitos Reservados.</footer>
     </main>
   </div>
   <section class="reader" id="reader" aria-label="Leitor de PDF">
     <div class="reader-bar"><span id="readerTitle"></span><button class="close" id="closeReader" type="button">Fechar</button></div>
     <iframe id="pdfFrame" title="Leitor de PDF"></iframe>
   </section>
+
   <script>
     const subjects = [
       { id:'bancarios', icon:'▣', name:'Conhecimentos Bancários' },
@@ -93,29 +106,164 @@
       { id:'redacao', icon:'✎', name:'Redação' },
       { id:'outros', icon:'＋', name:'Outros materiais' }
     ];
+    
     const store = Object.fromEntries(subjects.map(s => [s.id, []]));
     let active = 'bancarios';
+    let db;
     const el = id => document.getElementById(id);
+
+    // --- CONFIGURAÇÃO DO BANCO DE DADOS LOCAL (INDEXEDDB) ---
+    function initDB() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open('RotaBNB_Database', 1);
+
+        request.onupgradeneeded = (e) => {
+          const dbReady = e.target.result;
+          if (!dbReady.objectStoreNames.contains('pdfs')) {
+            dbReady.createObjectStore('pdfs', { keyPath: 'id', autoIncrement: true });
+          }
+        };
+
+        request.onsuccess = (e) => {
+          db = e.target.result;
+          resolve();
+        };
+
+        request.onerror = (e) => {
+          console.error('Erro ao abrir o banco de dados local:', e.target.error);
+          reject(e.target.error);
+        };
+      });
+    }
+
+    function loadSavedPDFs() {
+      const transaction = db.transaction(['pdfs'], 'readonly');
+      const objectStore = transaction.objectStore('pdfs');
+      const request = objectStore.openCursor();
+
+      request.onsuccess = (e) => {
+        const cursor = e.target.result;
+        if (cursor) {
+          const record = cursor.value;
+          if (store[record.subjectId]) {
+            store[record.subjectId].push({
+              dbId: record.id,
+              name: record.name,
+              size: record.size,
+              url: URL.createObjectURL(record.fileBlob)
+            });
+          }
+          cursor.continue();
+        } else {
+          render();
+        }
+      };
+    }
+
+    function savePDFToDB(subjectId, file) {
+      return new Promise((resolve) => {
+        const transaction = db.transaction(['pdfs'], 'readwrite');
+        const objectStore = transaction.objectStore('pdfs');
+        
+        const record = {
+          subjectId: subjectId,
+          name: file.name,
+          size: file.size,
+          fileBlob: file
+        };
+
+        const request = objectStore.add(record);
+        request.onsuccess = (e) => {
+          resolve(e.target.result);
+        };
+      });
+    }
+
+    function deletePDFFromDB(dbId) {
+      const transaction = db.transaction(['pdfs'], 'readwrite');
+      const objectStore = transaction.objectStore('pdfs');
+      objectStore.delete(dbId);
+    }
+
+    // --- CONTROLE DE SAUDAÇÃO E USUÁRIO ---
+    function checkUserGreeting() {
+      let username = localStorage.getItem('bnb_username');
+      if (!username) {
+        username = prompt('Qual é o seu nome para personalizarmos seus estudos?');
+        if (username && username.trim() !== '') {
+          localStorage.setItem('bnb_username', username.trim());
+        } else {
+          username = 'Estudante';
+        }
+      }
+      const hours = new Date().getHours();
+      let greeting = 'Olá';
+      if (hours >= 5 && hours < 12) greeting = 'Bom dia';
+      else if (hours >= 12 && hours < 18) greeting = 'Boa tarde';
+      else greeting = 'Boa noite';
+
+      el('welcomeTitle').textContent = `${greeting}, ${username}! Foco na aprovação.`;
+    }
+
+    // --- FUNÇÕES DE RENDERIZAÇÃO ---
     function size(bytes) { return bytes < 1024 * 1024 ? Math.max(1, Math.round(bytes / 1024)) + ' KB' : (bytes / 1024 / 1024).toFixed(1) + ' MB'; }
+    
     function renderSubjects() {
       el('subjects').innerHTML = subjects.map(s => `<button class="subject ${s.id === active ? 'active' : ''}" type="button" data-id="${s.id}"><span class="subject-icon">${s.icon}</span><span class="subject-name">${s.name}</span><span class="subject-files">${store[s.id].length} PDF${store[s.id].length === 1 ? '' : 's'}</span></button>`).join('');
       el('total').textContent = Object.values(store).flat().length + ' PDF' + (Object.values(store).flat().length === 1 ? '' : 's');
       document.querySelectorAll('.subject').forEach(b => b.addEventListener('click', () => { active = b.dataset.id; render(); }));
     }
+
     function renderFiles() {
       const subject = subjects.find(s => s.id === active);
       const files = store[active];
       el('current').textContent = subject.name;
-      el('files').innerHTML = files.length ? `<div class="file-list">${files.map((f, i) => `<article class="file"><div class="pdf">PDF</div><div class="file-info"><div class="file-name">${f.name}</div><div class="file-meta">${size(f.file.size)}</div></div><button class="open" type="button" data-open="${i}">Abrir</button><button class="remove" type="button" data-remove="${i}" aria-label="Remover ${f.name}">✕</button></article>`).join('')}</div>` : `<div class="empty"><strong>Nenhum PDF nesta matéria</strong>Toque em “Adicionar PDF” para começar.</div>`;
+      el('files').innerHTML = files.length ? `<div class="file-list">${files.map((f, i) => `<article class="file"><div class="pdf">PDF</div><div class="file-info"><div class="file-name">${f.name}</div><div class="file-meta">${size(f.size)}</div></div><button class="open" type="button" data-open="${i}">Abrir</button><button class="remove" type="button" data-remove="${i}" aria-label="Remover ${f.name}">✕</button></article>`).join('')}</div>` : `<div class="empty"><strong>Nenhum PDF nesta matéria</strong>Toque em “Adicionar PDF” para começar.</div>`;
+      
       document.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => openFile(files[Number(b.dataset.open)])));
-      document.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', () => { URL.revokeObjectURL(files[Number(b.dataset.remove)].url); files.splice(Number(b.dataset.remove), 1); render(); }));
+      
+      document.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', () => {
+        const index = Number(b.dataset.remove);
+        const fileToRemove = files[index];
+        
+        deletePDFFromDB(fileToRemove.dbId);
+        URL.revokeObjectURL(fileToRemove.url);
+        files.splice(index, 1);
+        
+        render();
+      }));
     }
+
     function render() { renderSubjects(); renderFiles(); }
     function openFile(item) { el('readerTitle').textContent = item.name; el('pdfFrame').src = item.url; el('reader').classList.add('show'); }
+    
     el('addButton').addEventListener('click', () => el('picker').click());
-    el('picker').addEventListener('change', e => { [...e.target.files].filter(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')).forEach(file => store[active].push({ name:file.name, file, url:URL.createObjectURL(file) })); e.target.value = ''; render(); });
+    
+    el('picker').addEventListener('change', async (e) => {
+      const selectedFiles = [...e.target.files].filter(f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'));
+      
+      for (const file of selectedFiles) {
+        const dbId = await savePDFToDB(active, file);
+        store[active].push({
+          dbId: dbId,
+          name: file.name,
+          size: file.size,
+          url: URL.createObjectURL(file)
+        });
+      }
+      
+      e.target.value = ''; 
+      render(); 
+    });
+
     el('closeReader').addEventListener('click', () => { el('reader').classList.remove('show'); el('pdfFrame').src = ''; });
-    render();
+    
+    // --- INICIALIZAÇÃO ---
+    checkUserGreeting();
+    
+    initDB()
+      .then(() => { loadSavedPDFs(); })
+      .catch(() => { render(); });
   </script>
 </body>
 </html>
