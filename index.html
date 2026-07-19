@@ -70,8 +70,8 @@
       <div class="notice">
         <span class="icon">🔒</span>
         <div>
-          <b>Seus arquivos ficam salvos de forma segura neste dispositivo</b>
-          Os PDFs agora permanecem guardados no navegador para uso posterior e não são enviados para a internet.
+          <b>Seus arquivos ficam salvos neste dispositivo</b>
+          Os PDFs permanecem guardados de forma segura no navegador para uso posterior e não são enviados para a internet.
         </div>
       </div>
       <div class="section-head"><h2>Matérias</h2><span class="count" id="total">0 PDFs</span></div>
@@ -150,7 +150,7 @@
               dbId: record.id,
               name: record.name,
               size: record.size,
-              url: URL.createObjectURL(record.fileBlob)
+              url: null // Iniciamos sem URL para carregar sob demanda ao abrir
             });
           }
           cursor.continue();
@@ -220,14 +220,17 @@
       el('current').textContent = subject.name;
       el('files').innerHTML = files.length ? `<div class="file-list">${files.map((f, i) => `<article class="file"><div class="pdf">PDF</div><div class="file-info"><div class="file-name">${f.name}</div><div class="file-meta">${size(f.size)}</div></div><button class="open" type="button" data-open="${i}">Abrir</button><button class="remove" type="button" data-remove="${i}" aria-label="Remover ${f.name}">✕</button></article>`).join('')}</div>` : `<div class="empty"><strong>Nenhum PDF nesta matéria</strong>Toque em “Adicionar PDF” para começar.</div>`;
       
-      document.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => openFile(files[Number(b.dataset.open)])));
+      document.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => {
+        const fileIndex = Number(b.dataset.open);
+        openFile(active, fileIndex);
+      }));
       
       document.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', () => {
         const index = Number(b.dataset.remove);
         const fileToRemove = files[index];
         
         deletePDFFromDB(fileToRemove.dbId);
-        URL.revokeObjectURL(fileToRemove.url);
+        if (fileToRemove.url) URL.revokeObjectURL(fileToRemove.url);
         files.splice(index, 1);
         
         render();
@@ -235,7 +238,29 @@
     }
 
     function render() { renderSubjects(); renderFiles(); }
-    function openFile(item) { el('readerTitle').textContent = item.name; el('pdfFrame').src = item.url; el('reader').classList.add('show'); }
+    
+    function openFile(subjectId, index) {
+      const item = store[subjectId][index];
+      
+      const transaction = db.transaction(['pdfs'], 'readonly');
+      const objectStore = transaction.objectStore('pdfs');
+      const request = objectStore.get(item.dbId);
+
+      request.onsuccess = (e) => {
+        const record = e.target.result;
+        if (record) {
+          if (item.url) URL.revokeObjectURL(item.url);
+          
+          item.url = URL.createObjectURL(record.fileBlob);
+          
+          el('readerTitle').textContent = item.name;
+          el('pdfFrame').src = item.url;
+          el('reader').classList.add('show');
+        } else {
+          alert('Erro ao carregar o arquivo do banco de dados local.');
+        }
+      };
+    }
     
     el('addButton').addEventListener('click', () => el('picker').click());
     
@@ -256,7 +281,10 @@
       render(); 
     });
 
-    el('closeReader').addEventListener('click', () => { el('reader').classList.remove('show'); el('pdfFrame').src = ''; });
+    el('closeReader').addEventListener('click', () => { 
+      el('reader').classList.remove('show'); 
+      el('pdfFrame').src = ''; 
+    });
     
     // --- INICIALIZAÇÃO ---
     checkUserGreeting();
